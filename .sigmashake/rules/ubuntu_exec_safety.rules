@@ -1,0 +1,100 @@
+# ubuntu_exec_safety.rules — Ubuntu/Linux execution safety enforcement.
+# Technology: ubuntu | Capability: exec
+# Covers: sudoers misconfig, AppArmor/SELinux disable, SUID, SSH hardening, UFW, shadow access.
+
+rule no-visudo-bypass {
+  enabled true
+  priority 100
+  severity error
+  DENY execution
+  IF command CONTAINS "/etc/sudoers" AND command NOT CONTAINS "visudo"
+  OR command REGEX "echo.*NOPASSWD.*>>.*sudoers"
+  OR command REGEX "tee.*sudoers"
+  MESSAGE "Editing /etc/sudoers directly can corrupt the file and lock you out. Always use 'visudo' which validates syntax before saving."
+}
+
+rule no-nopasswd-sudo {
+  enabled true
+  priority 100
+  severity error
+  ASK execution
+  IF command CONTAINS "NOPASSWD"
+  OR command REGEX "echo.*NOPASSWD.*sudo"
+  MESSAGE "NOPASSWD in sudoers removes the password requirement for sudo, allowing privilege escalation without authentication. Require passwords for all sudo calls."
+  PROMPT "Is NOPASSWD required for an automated service? If so, restrict it to a specific command: 'user ALL=(ALL) NOPASSWD: /usr/bin/specific-cmd'"
+}
+
+rule no-disable-apparmor {
+  enabled true
+  priority 95
+  severity error
+  DENY execution
+  IF command CONTAINS "systemctl disable apparmor"
+  OR command CONTAINS "systemctl stop apparmor"
+  OR command REGEX "aa-disable\\s+/"
+  OR command CONTAINS "aa-teardown"
+  MESSAGE "Disabling AppArmor removes mandatory access control protections that confine processes to their expected behavior. Keep AppArmor enforcing in production."
+}
+
+rule no-disable-ufw {
+  enabled true
+  priority 90
+  severity error
+  ASK execution
+  IF command CONTAINS "ufw disable"
+  OR command CONTAINS "ufw reset"
+  OR command REGEX "iptables\\s+-F"
+  OR command REGEX "iptables\\s+--flush"
+  OR command CONTAINS "systemctl stop ufw"
+  MESSAGE "Disabling the firewall (UFW/iptables) exposes all ports to the network. Ensure firewall rules are preserved and only temporarily bypassed if absolutely necessary."
+  PROMPT "Is disabling the firewall intentional? If testing, use 'ufw allow <port>' rather than disabling entirely. Restore with 'ufw enable' immediately after."
+}
+
+rule no-suid-setgid {
+  enabled true
+  priority 95
+  severity error
+  ASK execution
+  IF command CONTAINS "chmod +s"
+  OR command CONTAINS "chmod u+s"
+  OR command CONTAINS "chmod g+s"
+  OR command REGEX "chmod\\s+[0-9]*[246][0-9]{3}"
+  MESSAGE "Setting the SUID/SGID bit allows a program to run with the owner's (often root's) privileges regardless of who executes it — a common privilege escalation vector. Avoid SUID/SGID on custom binaries."
+  PROMPT "Is SUID/SGID required? Consider using capabilities (setcap) for specific privileges instead: 'setcap cap_net_bind_service=+ep /path/to/binary'"
+}
+
+rule no-selinux-disable {
+  enabled true
+  priority 95
+  severity error
+  DENY execution
+  IF command CONTAINS "setenforce 0"
+  OR command REGEX "sed.*selinux.*disabled"
+  OR command REGEX "sed.*SELINUX=disabled"
+  MESSAGE "Disabling SELinux removes mandatory access control that prevents privilege escalation and confines processes. Set to permissive mode for debugging, not disabled."
+}
+
+rule no-read-etc-shadow {
+  enabled true
+  priority 100
+  severity error
+  DENY execution
+  IF command REGEX "cat\\s+/etc/shadow"
+  OR command REGEX "less\\s+/etc/shadow"
+  OR command REGEX "head\\s+/etc/shadow"
+  OR command REGEX "tail\\s+/etc/shadow"
+  OR command REGEX "cp\\s+/etc/shadow"
+  MESSAGE "/etc/shadow contains hashed passwords for all system accounts. Reading this file enables offline password cracking. Access via PAM or getspent() for legitimate use."
+}
+
+rule no-passwd-root-direct {
+  enabled true
+  priority 90
+  severity error
+  ASK execution
+  IF command REGEX "passwd\\s+root"
+  OR command REGEX "echo.*:.*chpasswd"
+  OR command REGEX "usermod\\s+-p\\s+\\S+\\s+root"
+  MESSAGE "Directly setting or changing the root password is a high-impact operation that can lock out other administrators. Use sudo and document the change."
+  PROMPT "Is changing the root password intentional? Confirm this is a deliberate administrative action, not an unintended command."
+}
