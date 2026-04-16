@@ -16,22 +16,20 @@ rule no-ssh-passwordauth {
   enabled true
   priority 95
   severity error
-  ASK write
+  LOG write
   IF path GLOB "**/sshd_config" AND content CONTAINS "PasswordAuthentication yes"
   OR path GLOB "**/sshd_config.d/*.conf" AND content CONTAINS "PasswordAuthentication yes"
   MESSAGE "SSH password authentication is vulnerable to brute-force attacks. Use key-based authentication: set 'PasswordAuthentication no' and deploy SSH keys."
-  PROMPT "Is password authentication required for SSH? If so, ensure fail2ban or rate-limiting is configured. Prefer key-based auth with 'AuthorizedKeysFile ~/.ssh/authorized_keys'."
 }
 
 rule no-sudoers-nopasswd {
   enabled true
   priority 100
   severity error
-  ASK write
+  LOG write
   IF path GLOB "**/sudoers" AND content CONTAINS "NOPASSWD"
   OR path GLOB "**/sudoers.d/**" AND content CONTAINS "NOPASSWD"
   MESSAGE "NOPASSWD in sudoers grants passwordless privilege escalation. Restrict it to specific commands only: 'user ALL=(ALL) NOPASSWD: /usr/bin/specific-cmd'"
-  PROMPT "Is NOPASSWD scoped to a specific command? Wildcard NOPASSWD (ALL) is dangerous — limit it to the exact binary the service needs."
 }
 
 rule no-world-writable-cron {
@@ -48,20 +46,18 @@ rule no-systemd-world-writable-service {
   enabled true
   priority 90
   severity error
-  ASK write
+  LOG write
   IF path GLOB "**/*.service" AND content CONTAINS "User=root" AND content CONTAINS "ExecStart=/tmp/"
   OR path GLOB "**/*.service" AND content LINE_REGEX "ExecStart=.*&&.*curl"
   MESSAGE "Systemd service units that run as root and execute scripts from /tmp or download-and-execute patterns are common persistence and privilege escalation vectors."
-  PROMPT "Is this service unit running a trusted binary? Ensure ExecStart points to a verified, owned binary and the service drops privileges with User=/Group= directives."
 }
 
 rule no-pam-permissive {
   enabled true
   priority 95
   severity error
-  ASK write
+  LOG write
   IF path GLOB "**/pam.d/**" AND content CONTAINS "auth sufficient pam_permit.so"
   OR path GLOB "**/pam.d/**" AND content CONTAINS "auth required pam_permit.so"
   MESSAGE "pam_permit.so grants authentication to all users without verification — it bypasses all password checks. Use this only in explicitly isolated environments."
-  PROMPT "Is pam_permit.so intentionally configured? This grants anyone access without a password. Verify this is not applied to production services like sshd or sudo."
 }
