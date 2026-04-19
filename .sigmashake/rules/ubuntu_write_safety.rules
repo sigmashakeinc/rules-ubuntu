@@ -52,6 +52,55 @@ rule no-systemd-world-writable-service {
   MESSAGE "Systemd service units that run as root and execute scripts from /tmp or download-and-execute patterns are common persistence and privilege escalation vectors."
 }
 
+rule no-apt-source-without-signed-by {
+  enabled true
+  priority 95
+  severity error
+  LOG write
+  IF path GLOB "**/apt/sources.list.d/*.list" AND content LINE_REGEX "^\\s*deb\\s+(?!\\[[^\\]]*signed-by=)"
+  OR path GLOB "**/apt/sources.list" AND content LINE_REGEX "^\\s*deb\\s+(?!\\[[^\\]]*signed-by=)https?://"
+  MESSAGE "RISK: An apt source without 'signed-by=' falls back to the global /etc/apt/trusted.gpg* keyrings, so any key on the system can authenticate this repo's packages — defeating per-repo trust. FIX: write 'deb [signed-by=/etc/apt/keyrings/<vendor>.gpg] https://… suite component'."
+}
+
+rule no-disable-unattended-upgrades {
+  enabled true
+  priority 90
+  severity error
+  LOG write
+  IF path GLOB "**/apt/apt.conf.d/*" AND content LINE_REGEX "Unattended-Upgrade::.*\"0\""
+  OR path GLOB "**/apt/apt.conf.d/20auto-upgrades" AND content CONTAINS "\"0\""
+  OR path GLOB "**/apt/apt.conf.d/*" AND content CONTAINS "APT::Periodic::Unattended-Upgrade \"0\""
+  MESSAGE "RISK: Disabling unattended-upgrades stops automatic delivery of Ubuntu security (USN) patches — historically the only reason kernel/openssl/xz CVEs were closed before exploitation in fleet machines. FIX: keep 'APT::Periodic::Unattended-Upgrade \"1\"' and scope which origins auto-install via 'Unattended-Upgrade::Allowed-Origins' instead of disabling."
+}
+
+rule no-fstab-nosuid-removed {
+  enabled true
+  priority 85
+  severity warning
+  LOG write
+  IF path GLOB "**/fstab" AND content LINE_REGEX "^[^#].*\\s/(tmp|home|var|dev/shm)\\s+\\S+\\s+(?!.*nosuid)"
+  MESSAGE "RISK: Mounting /tmp, /home, /var, or /dev/shm without 'nosuid' (and ideally 'noexec','nodev') lets an attacker drop a SUID binary in a writable mount and gain root — a CIS Ubuntu Benchmark hardening control. FIX: add 'nosuid,nodev' (and 'noexec' where feasible) to the mount options."
+}
+
+rule no-pam-nullok {
+  enabled true
+  priority 95
+  severity error
+  DENY write
+  IF path GLOB "**/pam.d/**" AND content LINE_REGEX "pam_unix\\.so.*\\bnullok"
+  MESSAGE "RISK: 'nullok' on pam_unix lets accounts with an empty password hash log in with no password — any account whose hash field is blanked becomes a passwordless backdoor. FIX: remove the 'nullok' option; require a password (or key) for every account."
+}
+
+rule no-systemd-no-newprivileges-false {
+  enabled true
+  priority 80
+  severity warning
+  LOG write
+  IF path GLOB "**/*.service" AND content CONTAINS "NoNewPrivileges=false"
+  OR path GLOB "**/*.service" AND content CONTAINS "NoNewPrivileges=no"
+  MESSAGE "RISK: Setting NoNewPrivileges=false lets the unit (and its children) gain privileges via SUID/file capabilities — needed only for legitimate setuid helpers, otherwise it widens the blast radius of any RCE in the service. FIX: remove the line (default is false but you should explicitly set 'NoNewPrivileges=true' on hardened units)."
+}
+
 rule no-pam-permissive {
   enabled true
   priority 95
